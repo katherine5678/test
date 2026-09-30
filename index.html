@@ -15,20 +15,68 @@
 </head>
 <body>
   <header class="topbar">
-    <div>
-      <h1>待辦看板</h1>
+    <div class="heading">
+      <h1 id="title">
+        <span id="title-text" title="雙擊編輯">待辦看板</span>
+        <button type="button" id="title-edit" class="icon-btn" title="編輯標題" aria-label="編輯標題"></button>
+      </h1>
       <p class="subtitle" id="summary"></p>
     </div>
     <button type="button" id="theme-toggle" class="theme-toggle" aria-label="切換深色模式">
-      <span class="icon-moon" aria-hidden="true">🌙</span>
-      <span class="icon-sun" aria-hidden="true">☀️</span>
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
       <span id="theme-label"></span>
     </button>
   </header>
 
+  <nav class="tabs" id="tabs" role="tablist" aria-label="看板"></nav>
+  <nav class="projects" id="projects" aria-label="專案分類"></nav>
+
   <main class="board" id="board"></main>
 
-  <p class="hint">拖曳卡片即可移動 · 雙擊文字編輯 · 資料儲存在瀏覽器中</p>
+  <p class="hint">拖曳卡片即可移動 · 點兩下卡片開啟細項編輯 · 雙擊看板名稱可以改名 · 資料儲存在瀏覽器中</p>
+
+  <dialog id="card-dialog" class="dialog" aria-labelledby="dialog-title">
+    <form id="card-form" method="dialog" autocomplete="off">
+      <header class="dialog-head">
+        <h2 id="dialog-title">編輯卡片</h2>
+        <button type="button" class="icon-btn" id="dialog-close" title="關閉" aria-label="關閉"></button>
+      </header>
+
+      <label class="field">
+        <span>標題</span>
+        <input type="text" id="field-title" maxlength="200" required>
+      </label>
+
+      <label class="field">
+        <span>細項內容</span>
+        <textarea id="field-notes" rows="7" placeholder="補充說明、步驟、連結…"></textarea>
+      </label>
+
+      <div class="field-row">
+        <label class="field">
+          <span>截止日期</span>
+          <input type="date" id="field-due">
+        </label>
+        <label class="field">
+          <span>狀態</span>
+          <select id="field-status"></select>
+        </label>
+      </div>
+
+      <label class="field">
+        <span>專案</span>
+        <select id="field-project"></select>
+      </label>
+
+      <footer class="dialog-foot">
+        <button type="button" class="icon-btn" id="dialog-delete" title="刪除卡片" aria-label="刪除卡片"></button>
+        <span class="spacer"></span>
+        <button type="button" class="btn" id="dialog-cancel">取消</button>
+        <button type="submit" class="btn primary">儲存</button>
+      </footer>
+    </form>
+  </dialog>
 
   <template id="column-template">
     <section class="column">
@@ -39,6 +87,7 @@
         <button type="button" class="clear link" hidden>清除</button>
       </header>
       <ul class="cards"></ul>
+      <button type="button" class="collapse-toggle" hidden></button>
       <form class="add-form" autocomplete="off">
         <input type="text" maxlength="200" placeholder="＋ 新增卡片">
       </form>
