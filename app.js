@@ -498,19 +498,37 @@ function renderCard(card) {
     if (!e.target.closest("button")) openCardDialog(card);
   });
 
+  // 左邊：標題、細項、標籤；右邊：操作圖示
+  const body = document.createElement("div");
+  body.className = "card-body";
+
+  // 標題列：標題 + 截止日期（含逾期提示）
+  const titleRow = document.createElement("div");
+  titleRow.className = "title-row";
   const text = document.createElement("span");
   text.className = "text";
   text.textContent = card.text;
-  li.append(text);
+  titleRow.append(text);
+
+  const due = dueInfo(card.due);
+  if (due) {
+    const pill = document.createElement("span");
+    pill.className = "pill due " + (card.status === "done" ? "" : due.cls);
+    pill.innerHTML = icon("calendar");
+    pill.append(card.status === "done" ? `${card.due.slice(5).replace("-", "/")} 截止` : due.label);
+    pill.title = `截止日期：${card.due}`;
+    titleRow.append(pill);
+  }
+  body.append(titleRow);
 
   if (card.notes) {
     const notes = document.createElement("p");
     notes.className = "notes";
     notes.textContent = card.notes;
-    li.append(notes);
+    body.append(notes);
   }
 
-  // 專案、截止日期標籤
+  // 專案標籤
   const meta = document.createElement("div");
   meta.className = "meta";
   const project = projectName(board, card.projectId);
@@ -521,33 +539,29 @@ function renderCard(card) {
     tag.append(project);
     meta.append(tag);
   }
-  const due = dueInfo(card.due);
-  if (due) {
-    const pill = document.createElement("span");
-    pill.className = "pill due " + (card.status === "done" ? "" : due.cls);
-    pill.innerHTML = icon("calendar");
-    pill.append(card.status === "done" ? `${card.due.slice(5).replace("-", "/")} 截止` : due.label);
-    pill.title = `截止日期：${card.due}`;
-    meta.append(pill);
-  }
-  if (meta.childElementCount) li.append(meta);
+  if (meta.childElementCount) body.append(meta);
+  li.append(body);
 
   const actions = document.createElement("div");
   actions.className = "card-actions";
 
+  // 下排：編輯、刪除、移到其他看板
+  const tools = document.createElement("span");
+  tools.className = "tools";
   const edit = iconButton("edit", "編輯細項", () => openCardDialog(card));
   const del = iconButton("trash", "刪除卡片", () => {
     if (!confirm(`確定要刪除「${card.text}」嗎？`)) return;
     removeCard(card.id);
     update();
   });
-  actions.append(edit, del);
+  tools.append(edit, del);
+  actions.append(tools);
 
   // 移到其他看板（只有一個看板時不顯示）
   if (state.boards.length > 1) {
     const toBoard = iconButton("board", "移到其他看板", () => openBoardMenu(toBoard, card));
     toBoard.setAttribute("aria-haspopup", "menu");
-    actions.append(toBoard);
+    tools.append(toBoard);
   }
 
   // 左右移動按鈕：觸控裝置或不方便拖曳時使用
@@ -562,7 +576,7 @@ function renderCard(card) {
     const next = COLUMNS[col + 1];
     move.append(iconButton("right", `移到「${next.title}」`, () => moveCard(card.id, next.status)));
   }
-  actions.append(move);
+  actions.prepend(move); // 箭頭在上排，其他圖示在下排
   li.append(actions);
 
   li.addEventListener("dragstart", (e) => {
