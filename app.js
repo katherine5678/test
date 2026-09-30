@@ -7,7 +7,6 @@ const DEFAULT_TITLE = "待辦看板";
 const DONE_LIMIT = 10; // 已完成超過這個數量就可以收合
 
 const COLUMNS = [
-  { status: "urgent", title: "優先處理" },
   { status: "todo", title: "待辦" },
   { status: "doing", title: "進行中" },
   { status: "done", title: "已完成" },
@@ -28,8 +27,11 @@ const columnTemplate = document.getElementById("column-template");
 const themeToggle = document.getElementById("theme-toggle");
 const themeLabel = document.getElementById("theme-label");
 
+const searchInput = document.getElementById("search");
+
 let state = load();
 let draggingId = null;
+const searchTerms = new Map(); // 每個看板各自的搜尋字（不存檔）
 const expandedDone = new Set(); // 目前展開「已完成」的看板 id（不存檔，重新整理後預設收合）
 
 /* ---------- 資料 ---------- */
@@ -54,6 +56,14 @@ function normalize(s) {
     b.cards ||= [];
     b.projects ||= [];
     b.activeProject ||= ALL;
+    b.cards.forEach((c) => {
+      // 舊版的「優先處理」欄改成：放進待辦並標星號
+      if (c.status === "urgent") {
+        c.status = "todo";
+        c.starred = true;
+      }
+      if (!COLUMNS.some((col) => col.status === c.status)) c.status = "todo";
+    });
     if (![ALL, NONE].includes(b.activeProject) && !b.projects.some((p) => p.id === b.activeProject)) {
       b.activeProject = ALL;
     }
@@ -102,21 +112,63 @@ function sortedProjects(board) {
   return [...board.projects].sort((a, b) => a.name.localeCompare(b.name, "zh-Hant"));
 }
 
-// 目前專案篩選下看得到的卡片
-function visibleCards(board) {
+function searchTerm(board) {
+  return (searchTerms.get(board.id) || "").trim().toLowerCase();
+}
+
+// 搜尋標題、細項內容、專案名稱
+function matchesSearch(board, card) {
+  const term = searchTerm(board);
+  if (!term) return true;
+  const haystack = [card.text, card.notes, projectName(board, card.projectId)].filter(Boolean).join("\n").toLowerCase();
+  return haystack.includes(term);
+}
+
+// 目前專案篩選下看得到的卡片（不含搜尋）
+function projectCards(board) {
   const filter = board.activeProject;
   if (filter === ALL) return board.cards;
   if (filter === NONE) return board.cards.filter((c) => !projectName(board, c.projectId));
   return board.cards.filter((c) => c.projectId === filter);
 }
 
+// 專案篩選 + 搜尋之後看得到的卡片
+function visibleCards(board) {
+  return projectCards(board).filter((c) => matchesSearch(board, c));
+}
+
+// 把文字中符合搜尋的部分用 <mark> 標出來
+function highlight(el, value, term) {
+  if (!term) {
+    el.textContent = value;
+    return;
+  }
+  const lower = value.toLowerCase();
+  let from = 0;
+  let at;
+  while ((at = lower.indexOf(term, from)) !== -1) {
+    el.append(value.slice(from, at));
+    const mark = document.createElement("mark");
+    mark.textContent = value.slice(at, at + term.length);
+    el.append(mark);
+    from = at + term.length;
+  }
+  el.append(value.slice(from));
+}
+
 function firstCardId(board, status) {
   return board.cards.find((c) => c.status === status)?.id ?? null;
+}
+
+// 記錄卡片的更新時間（星號卡片依此排序）
+function touch(card) {
+  card.updatedAt = Date.now();
 }
 
 // 把卡片放到 status 欄，插在 beforeId 前面；沒指定時：移進「已完成」放最上面，其他放最後
 function placeCard(board, card, status, beforeId = undefined) {
   const changed = card.status !== status;
+  touch(card);
   board.cards = board.cards.filter((c) => c.id !== card.id);
   card.status = status;
   if (beforeId === undefined) beforeId = status === "done" && changed ? firstCardId(board, "done") : null;
@@ -175,6 +227,7 @@ const ICON_PATHS = {
   notes: '<path d="M15 12h-5"/><path d="M15 8h-5"/><path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/>',
   down: '<path d="m6 9 6 6 6-6"/>',
   up: '<path d="m18 15-6-6-6 6"/>',
+  star: '<path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/>',
 };
 
 function icon(name) {
@@ -237,10 +290,34 @@ function render() {
     board.activeProject === ALL ? `「${board.name}」`
     : board.activeProject === NONE ? `「${board.name} · 未分類」`
     : `「${board.name} · ${projectName(board, board.activeProject)}」`;
-  summary.textContent = cards.length
-    ? `${scope}共 ${cards.length} 張卡片，已完成 ${doneCount} 張`
-    : `${scope}今天想完成什麼？`;
+  const term = (searchTerms.get(board.id) || "").trim();
+  if (term) {
+    summary.textContent = cards.length
+      ? `${scope}搜尋「${term}」：找到 ${cards.length} 張卡片`
+      : `${scope}找不到符合「${term}」的卡片`;
+  } else {
+    summary.textContent = cards.length
+      ? `${scope}共 ${cards.length} 張卡片，已完成 ${doneCount} 張`
+      : `${scope}今天想完成什麼？`;
+  }
+
+  // 切換看板時，搜尋框換成該看板的搜尋字
+  const value = searchTerms.get(board.id) || "";
+  if (searchInput.value !== value) searchInput.value = value;
 }
+
+searchInput.addEventListener("input", () => {
+  searchTerms.set(state.activeId, searchInput.value);
+  render();
+});
+
+searchInput.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && searchInput.value) {
+    searchInput.value = "";
+    searchTerms.delete(state.activeId);
+    render();
+  }
+});
 
 /* 看板分頁 */
 
@@ -337,6 +414,30 @@ function renderProjects() {
       update();
     });
     wrap.append(btn);
+
+    // 把卡片拖到專案標籤上就能換專案
+    if (id !== ALL) {
+      wrap.addEventListener("dragover", (e) => {
+        if (!draggingId) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        wrap.classList.add("drop-target");
+      });
+      wrap.addEventListener("dragleave", (e) => {
+        if (!wrap.contains(e.relatedTarget)) wrap.classList.remove("drop-target");
+      });
+      wrap.addEventListener("drop", (e) => {
+        if (!draggingId) return;
+        e.preventDefault();
+        const card = board.cards.find((c) => c.id === draggingId);
+        if (!card) return;
+        if (id === NONE) delete card.projectId;
+        else card.projectId = id;
+        touch(card);
+        draggingId = null; // 重新繪製後原本的卡片元素會被移除，dragend 不一定會觸發
+        update();
+      });
+    }
     return { wrap, btn };
   };
 
@@ -356,7 +457,8 @@ function renderProjects() {
   });
 
   const uncategorized = board.cards.filter((c) => !projectName(board, c.projectId)).length;
-  if (board.projects.length && (uncategorized || board.activeProject === NONE)) {
+  // 有專案時就顯示「未分類」，也方便把卡片拖回未分類
+  if (board.projects.length) {
     chips.push(chip(NONE, "未分類", uncategorized).wrap);
   }
 
@@ -425,7 +527,10 @@ titleText.addEventListener("dblclick", startTitleEdit);
 function renderColumn({ status, title }) {
   const board = activeBoard();
   const column = columnTemplate.content.firstElementChild.cloneNode(true);
-  const items = visibleCards(board).filter((c) => c.status === status);
+  // 標星號的卡片排在最上面，依更新時間由新到舊；其餘維持原本順序
+  const all = visibleCards(board).filter((c) => c.status === status);
+  const starred = all.filter((c) => c.starred).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  const items = [...starred, ...all.filter((c) => !c.starred)];
 
   column.dataset.status = status;
   column.querySelector("h2").textContent = title;
@@ -472,7 +577,7 @@ function renderColumn({ status, title }) {
     e.preventDefault();
     const text = input.value.trim();
     if (!text) return;
-    const card = { id: newId(), text, status };
+    const card = { id: newId(), text, status, updatedAt: Date.now() };
     // 正在看某個專案時，新卡片直接歸到該專案
     if (![ALL, NONE].includes(board.activeProject)) card.projectId = board.activeProject;
     if (status === "done") board.cards.splice(Math.max(0, board.cards.findIndex((c) => c.status === "done")), 0, card);
@@ -505,10 +610,21 @@ function renderCard(card) {
   // 標題列：標題 + 截止日期（含逾期提示）
   const titleRow = document.createElement("div");
   titleRow.className = "title-row";
+  // 星號（標題左側）：標記優先處理
+  const star = iconButton("star", card.starred ? "取消星號" : "標上星號（優先處理）", () => {
+    if (card.starred) delete card.starred;
+    else card.starred = true;
+    touch(card);
+    update();
+  }, "star" + (card.starred ? " starred" : ""));
+  star.setAttribute("aria-pressed", String(!!card.starred));
+  if (card.starred) li.classList.add("is-starred");
+
+  const term = searchTerm(board);
   const text = document.createElement("span");
   text.className = "text";
-  text.textContent = card.text;
-  titleRow.append(text);
+  highlight(text, card.text, term);
+  titleRow.append(star, text);
 
   const due = dueInfo(card.due);
   if (due) {
@@ -524,7 +640,7 @@ function renderCard(card) {
   if (card.notes) {
     const notes = document.createElement("p");
     notes.className = "notes";
-    notes.textContent = card.notes;
+    highlight(notes, card.notes, term);
     body.append(notes);
   }
 
@@ -557,9 +673,9 @@ function renderCard(card) {
   tools.append(edit, del);
   actions.append(tools);
 
-  // 移到其他看板（只有一個看板時不顯示）
-  if (state.boards.length > 1) {
-    const toBoard = iconButton("board", "移到其他看板", () => openBoardMenu(toBoard, card));
+  // 移到其他專案或看板（沒有可以移的地方時不顯示）
+  if (state.boards.length > 1 || board.projects.length) {
+    const toBoard = iconButton("board", "移到其他專案或看板", () => openBoardMenu(toBoard, card));
     toBoard.setAttribute("aria-haspopup", "menu");
     tools.append(toBoard);
   }
@@ -649,6 +765,7 @@ cardForm.addEventListener("submit", (e) => {
   else delete card.due;
   if (fieldProject.value) card.projectId = fieldProject.value;
   else delete card.projectId;
+  touch(card);
   if (fieldStatus.value !== card.status) placeCard(board, card, fieldStatus.value);
 
   closeCardDialog();
@@ -706,30 +823,59 @@ function openBoardMenu(button, card) {
   menu.className = "menu";
   menu.setAttribute("role", "menu");
 
-  const heading = document.createElement("div");
-  heading.className = "menu-heading";
-  heading.textContent = "移到看板";
-  menu.append(heading);
+  const board = activeBoard();
 
-  state.boards
-    .filter((b) => b.id !== state.activeId)
-    .forEach((target) => {
-      const item = document.createElement("button");
-      item.type = "button";
-      item.className = "menu-item";
-      item.setAttribute("role", "menuitem");
-      item.textContent = target.name;
-      item.addEventListener("click", () => {
-        closeBoardMenu();
+  const heading = (label) => {
+    const el = document.createElement("div");
+    el.className = "menu-heading";
+    el.textContent = label;
+    menu.append(el);
+  };
+
+  const item = (label, current, onPick) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "menu-item" + (current ? " current" : "");
+    btn.setAttribute("role", "menuitem");
+    btn.textContent = label;
+    if (current) {
+      btn.disabled = true;
+      btn.title = "目前所在位置";
+    }
+    btn.addEventListener("click", () => {
+      closeBoardMenu();
+      onPick();
+      touch(card);
+      update();
+    });
+    menu.append(btn);
+  };
+
+  // 同一個看板內換專案
+  if (board.projects.length) {
+    heading("移到專案");
+    const currentProject = projectName(board, card.projectId) ? card.projectId : null;
+    sortedProjects(board).forEach((project) => {
+      item(project.name, currentProject === project.id, () => (card.projectId = project.id));
+    });
+    item("未分類", currentProject === null, () => delete card.projectId);
+  }
+
+  // 移到其他看板
+  const others = state.boards.filter((b) => b.id !== state.activeId);
+  if (others.length) {
+    if (board.projects.length) menu.append(Object.assign(document.createElement("hr"), { className: "menu-sep" }));
+    heading("移到看板");
+    others.forEach((target) => {
+      item(target.name, false, () => {
         removeCard(card.id);
         delete card.projectId; // 專案屬於各自的看板，移過去後改為未分類
         const status = card.status;
         card.status = null; // 讓 placeCard 視為換欄，「已完成」會放到最上面
         placeCard(target, card, status);
-        update();
       });
-      menu.append(item);
     });
+  }
 
   document.body.append(menu);
 
@@ -737,9 +883,12 @@ function openBoardMenu(button, card) {
   const rect = button.getBoundingClientRect();
   const width = menu.offsetWidth;
   const height = menu.offsetHeight;
-  let left = Math.min(rect.left, window.innerWidth - width - 8);
+  // clientWidth / clientHeight 不含捲軸，避免選單超出畫面
+  const viewW = document.documentElement.clientWidth;
+  const viewH = document.documentElement.clientHeight;
+  let left = Math.min(rect.right - width, viewW - width - 8); // 靠右對齊按鈕
   let top = rect.bottom + 6;
-  if (top + height > window.innerHeight - 8) top = rect.top - height - 6;
+  if (top + height > viewH - 8) top = rect.top - height - 6;
   menu.style.left = `${Math.max(8, left) + window.scrollX}px`;
   menu.style.top = `${Math.max(8, top) + window.scrollY}px`;
 
@@ -749,7 +898,7 @@ function openBoardMenu(button, card) {
   document.addEventListener("keydown", onMenuKey, true);
   window.addEventListener("resize", closeBoardMenu);
   window.addEventListener("scroll", closeBoardMenu, true);
-  menu.querySelector(".menu-item")?.focus();
+  menu.querySelector(".menu-item:not(:disabled)")?.focus();
 }
 
 /* ---------- 拖放 ---------- */
@@ -782,7 +931,9 @@ function setupDropZone(column, list, status) {
     if (next && next.dataset.id === draggingId) next = next.nextElementSibling;
     // 放在收合清單的最後面時，插在被收起來的第一張前面
     const beforeId = next?.dataset.id || list.dataset.hiddenFirst || null;
-    moveCard(draggingId, status, beforeId);
+    const id = draggingId;
+    draggingId = null; // 重新繪製後原本的卡片元素會被移除，dragend 不一定會觸發
+    moveCard(id, status, beforeId);
   });
 }
 
