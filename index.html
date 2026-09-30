@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>待辦事項</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="app">
+    <header>
+      <h1>待辦事項</h1>
+      <p class="subtitle" id="summary"></p>
+    </header>
+
+    <form id="new-form" class="new-form" autocomplete="off">
+      <input id="new-input" type="text" placeholder="新增一件要做的事…" maxlength="200" aria-label="新增待辦事項" required>
+      <button type="submit">新增</button>
+    </form>
+
+    <nav class="filters" aria-label="篩選">
+      <button type="button" data-filter="all" class="active">全部</button>
+      <button type="button" data-filter="active">未完成</button>
+      <button type="button" data-filter="done">已完成</button>
+    </nav>
+
+    <ul id="list" class="list"></ul>
+    <p id="empty" class="empty" hidden>目前沒有項目</p>
+
+    <footer class="toolbar">
+      <span id="count"></span>
+      <button type="button" id="clear-done" class="link">清除已完成</button>
+    </footer>
+
+    <p class="hint">雙擊項目文字可以編輯 · 資料儲存在瀏覽器中</p>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
