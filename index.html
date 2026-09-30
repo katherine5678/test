@@ -3,37 +3,47 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>待辦事項</title>
+  <title>待辦看板</title>
+  <script>
+    // 在畫面繪製前套用主題，避免閃爍
+    try {
+      const saved = localStorage.getItem("theme");
+      if (saved === "light" || saved === "dark") document.documentElement.dataset.theme = saved;
+    } catch {}
+  </script>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <main class="app">
-    <header>
-      <h1>待辦事項</h1>
+  <header class="topbar">
+    <div>
+      <h1>待辦看板</h1>
       <p class="subtitle" id="summary"></p>
-    </header>
+    </div>
+    <button type="button" id="theme-toggle" class="theme-toggle" aria-label="切換深色模式">
+      <span class="icon-moon" aria-hidden="true">🌙</span>
+      <span class="icon-sun" aria-hidden="true">☀️</span>
+      <span id="theme-label"></span>
+    </button>
+  </header>
 
-    <form id="new-form" class="new-form" autocomplete="off">
-      <input id="new-input" type="text" placeholder="新增一件要做的事…" maxlength="200" aria-label="新增待辦事項" required>
-      <button type="submit">新增</button>
-    </form>
+  <main class="board" id="board"></main>
 
-    <nav class="filters" aria-label="篩選">
-      <button type="button" data-filter="all" class="active">全部</button>
-      <button type="button" data-filter="active">未完成</button>
-      <button type="button" data-filter="done">已完成</button>
-    </nav>
+  <p class="hint">拖曳卡片即可移動 · 雙擊文字編輯 · 資料儲存在瀏覽器中</p>
 
-    <ul id="list" class="list"></ul>
-    <p id="empty" class="empty" hidden>目前沒有項目</p>
-
-    <footer class="toolbar">
-      <span id="count"></span>
-      <button type="button" id="clear-done" class="link">清除已完成</button>
-    </footer>
-
-    <p class="hint">雙擊項目文字可以編輯 · 資料儲存在瀏覽器中</p>
-  </main>
+  <template id="column-template">
+    <section class="column">
+      <header class="column-head">
+        <span class="dot"></span>
+        <h2></h2>
+        <span class="badge"></span>
+        <button type="button" class="clear link" hidden>清除</button>
+      </header>
+      <ul class="cards"></ul>
+      <form class="add-form" autocomplete="off">
+        <input type="text" maxlength="200" placeholder="＋ 新增卡片">
+      </form>
+    </section>
+  </template>
 
   <script src="app.js"></script>
 </body>
