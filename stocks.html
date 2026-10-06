@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>股票紀錄</title>
+  <script>
+    // 在畫面繪製前套用主題，避免閃爍
+    try {
+      const saved = localStorage.getItem("theme");
+      if (saved === "light" || saved === "dark") document.documentElement.dataset.theme = saved;
+    } catch {}
+  </script>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="stocks.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="heading">
+      <nav class="page-switch" aria-label="切換頁面">
+        <a href="index.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M8 7v7"/><path d="M12 7v4"/><path d="M16 7v9"/></svg>看板</a>
+        <a href="stocks.html" class="active" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 7 13.5 15.5 8.5 10.5 2 17"/><path d="M16 7h6v6"/></svg>股票</a>
+      </nav>
+      <h1>股票紀錄</h1>
+      <p class="subtitle" id="range-label"></p>
+    </div>
+    <div class="top-actions">
+      <button type="button" id="settings-btn" class="icon-btn" title="手續費與交易稅設定" aria-label="手續費與交易稅設定"></button>
+      <button type="button" id="excel-btn" class="icon-btn" title="下載 Excel 報表（依目前期間與股票篩選）" aria-label="下載 Excel 報表"></button>
+      <button type="button" id="export-btn" class="icon-btn" title="匯出備份（JSON 檔）" aria-label="匯出備份"></button>
+      <button type="button" id="import-btn" class="icon-btn" title="匯入備份（JSON 檔）" aria-label="匯入備份"></button>
+      <input type="file" id="import-file" accept=".json,application/json" hidden>
+      <button type="button" id="theme-toggle" class="theme-toggle" aria-label="切換深色模式">
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+        <span id="theme-label"></span>
+      </button>
+    </div>
+  </header>
+
+  <div class="stock-toolbar">
+    <div class="segmented" id="periods" role="group" aria-label="期間"></div>
+    <div class="custom-range" id="custom-range" hidden>
+      <input type="date" id="range-from" aria-label="開始日期">
+      <span>～</span>
+      <input type="date" id="range-to" aria-label="結束日期">
+    </div>
+    <select id="symbol-filter" aria-label="篩選股票"></select>
+    <span class="spacer"></span>
+    <button type="button" class="btn" id="add-transfer">＋ 資金進出</button>
+    <button type="button" class="btn" id="add-dividend">＋ 新增股利</button>
+    <button type="button" class="btn primary" id="add-trade">＋ 新增交易</button>
+  </div>
+
+  <main class="stock-main">
+    <section class="stats" id="stats" aria-label="期間統計"></section>
+
+    <section class="panel">
+      <header class="panel-head">
+        <h2>目前持股</h2>
+        <span class="panel-note" id="holdings-note"></span>
+      </header>
+      <div class="table-wrap"><table id="holdings-table"></table></div>
+    </section>
+
+    <section class="panel">
+      <header class="panel-head">
+        <h2>交易紀錄</h2>
+        <span class="panel-note">依期間篩選</span>
+      </header>
+      <div class="table-wrap"><table id="trades-table"></table></div>
+    </section>
+
+    <section class="panel">
+      <header class="panel-head">
+        <h2>股利紀錄</h2>
+        <span class="panel-note">依期間篩選</span>
+      </header>
+      <div class="table-wrap"><table id="dividends-table"></table></div>
+    </section>
+
+    <section class="panel">
+      <header class="panel-head">
+        <h2>年度股利</h2>
+        <span class="panel-note">所有年度，依發放日期統計</span>
+      </header>
+      <div class="table-wrap"><table id="yearly-table"></table></div>
+    </section>
+
+    <section class="panel">
+      <header class="panel-head">
+        <h2>各銀行出資</h2>
+        <span class="panel-note">所有期間累計，不受股票篩選影響</span>
+      </header>
+      <div class="table-wrap"><table id="banks-table"></table></div>
+    </section>
+
+    <section class="panel">
+      <header class="panel-head">
+        <h2>資金進出紀錄</h2>
+        <span class="panel-note">依期間篩選；入金＝銀行轉入股票帳戶，出金＝轉回銀行</span>
+      </header>
+      <div class="table-wrap"><table id="transfers-table"></table></div>
+    </section>
+  </main>
+
+  <p class="hint">資料儲存在這個瀏覽器中，換電腦時可用右上角的匯出／匯入搬移 · 資金進出不受股票篩選影響 · 損益依平均成本法計算，台股慣例紅色為賺、綠色為賠</p>
+
+  <datalist id="symbol-list"></datalist>
+  <datalist id="bank-list"></datalist>
+
+  <!-- 新增／編輯資金進出 -->
+  <dialog id="transfer-dialog" class="dialog" aria-labelledby="transfer-title">
+    <form id="transfer-form" method="dialog" autocomplete="off">
+      <header class="dialog-head">
+        <h2 id="transfer-title">新增資金進出</h2>
+        <button type="button" class="icon-btn" data-close title="關閉" aria-label="關閉"></button>
+      </header>
+
+      <div class="segmented side-switch" role="radiogroup" aria-label="入金或出金">
+        <label><input type="radio" name="type" value="in" checked><span>入金</span></label>
+        <label><input type="radio" name="type" value="out"><span>出金</span></label>
+      </div>
+      <p class="form-note">入金：從銀行轉入股票帳戶；出金：從股票帳戶轉回銀行。</p>
+
+      <div class="field-row">
+        <label class="field">
+          <span>日期</span>
+          <input type="date" name="date" required>
+        </label>
+        <label class="field">
+          <span>銀行</span>
+          <input type="text" name="bank" list="bank-list" maxlength="30" required placeholder="例如 國泰世華">
+        </label>
+      </div>
+
+      <label class="field">
+        <span>金額（元）</span>
+        <input type="number" name="amount" min="1" step="any" required>
+      </label>
+
+      <label class="field">
+        <span>備註</span>
+        <input type="text" name="note" maxlength="200">
+      </label>
+
+      <footer class="dialog-foot">
+        <span class="spacer"></span>
+        <button type="button" class="btn" data-close>取消</button>
+        <button type="submit" class="btn primary">儲存</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- 新增／編輯交易 -->
+  <dialog id="trade-dialog" class="dialog" aria-labelledby="trade-title">
+    <form id="trade-form" method="dialog" autocomplete="off">
+      <header class="dialog-head">
+        <h2 id="trade-title">新增交易</h2>
+        <button type="button" class="icon-btn" data-close title="關閉" aria-label="關閉"></button>
+      </header>
+
+      <div class="segmented side-switch" role="radiogroup" aria-label="買賣">
+        <label><input type="radio" name="side" value="buy" checked><span>買進</span></label>
+        <label><input type="radio" name="side" value="sell"><span>賣出</span></label>
+      </div>
+
+      <div class="field-row">
+        <label class="field">
+          <span>交易日期</span>
+          <input type="date" name="date" required>
+        </label>
+        <label class="field">
+          <span>股票代號</span>
+          <input type="text" name="symbol" list="symbol-list" maxlength="12" required placeholder="例如 2330">
+        </label>
+      </div>
+
+      <label class="field">
+        <span>股票名稱</span>
+        <input type="text" name="name" maxlength="30" placeholder="例如 台積電">
+      </label>
+
+      <div class="field-row">
+        <label class="field">
+          <span>股數</span>
+          <input type="number" name="shares" min="1" step="1" required placeholder="一張 = 1000 股">
+        </label>
+        <label class="field">
+          <span>成交價</span>
+          <input type="number" name="price" min="0" step="any" required>
+        </label>
+      </div>
+
+      <div class="field-row">
+        <label class="field">
+          <span>手續費（自動計算，可修改）</span>
+          <input type="number" name="fee" min="0" step="1">
+        </label>
+        <label class="field">
+          <span>交易稅（賣出時自動計算）</span>
+          <input type="number" name="tax" min="0" step="1">
+        </label>
+      </div>
+
+      <p class="form-total" id="trade-total"></p>
+
+      <label class="field">
+        <span>備註</span>
+        <input type="text" name="note" maxlength="200">
+      </label>
+
+      <footer class="dialog-foot">
+        <span class="spacer"></span>
+        <button type="button" class="btn" data-close>取消</button>
+        <button type="submit" class="btn primary">儲存</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- 新增／編輯股利 -->
+  <dialog id="dividend-dialog" class="dialog" aria-labelledby="dividend-title">
+    <form id="dividend-form" method="dialog" autocomplete="off">
+      <header class="dialog-head">
+        <h2 id="dividend-title">新增股利</h2>
+        <button type="button" class="icon-btn" data-close title="關閉" aria-label="關閉"></button>
+      </header>
+
+      <div class="field-row">
+        <label class="field">
+          <span>發放日期</span>
+          <input type="date" name="date" required>
+        </label>
+        <label class="field">
+          <span>股票代號</span>
+          <input type="text" name="symbol" list="symbol-list" maxlength="12" required placeholder="例如 0056">
+        </label>
+      </div>
+
+      <label class="field">
+        <span>股票名稱</span>
+        <input type="text" name="name" maxlength="30">
+      </label>
+
+      <div class="field-row">
+        <label class="field">
+          <span>現金股利（實際入帳金額）</span>
+          <input type="number" name="cash" min="0" step="any">
+        </label>
+        <label class="field">
+          <span>股票股利（配發股數）</span>
+          <input type="number" name="stockShares" min="0" step="1">
+        </label>
+      </div>
+
+      <label class="field">
+        <span>備註</span>
+        <input type="text" name="note" maxlength="200">
+      </label>
+
+      <footer class="dialog-foot">
+        <span class="spacer"></span>
+        <button type="button" class="btn" data-close>取消</button>
+        <button type="submit" class="btn primary">儲存</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- 手續費設定 -->
+  <dialog id="settings-dialog" class="dialog" aria-labelledby="settings-title">
+    <form id="settings-form" method="dialog" autocomplete="off">
+      <header class="dialog-head">
+        <h2 id="settings-title">手續費與交易稅</h2>
+        <button type="button" class="icon-btn" data-close title="關閉" aria-label="關閉"></button>
+      </header>
+
+      <p class="form-note">新增交易時會依這裡的設定自動帶入手續費和交易稅，每筆都還可以手動修改。手續費率為 0.1425%。</p>
+
+      <div class="field-row">
+        <label class="field">
+          <span>手續費折扣（6 折填 0.6）</span>
+          <input type="number" name="feeDiscount" min="0.01" max="1" step="any" required>
+        </label>
+        <label class="field">
+          <span>最低手續費（元）</span>
+          <input type="number" name="minFee" min="0" step="1" required>
+        </label>
+      </div>
+
+      <label class="field">
+        <span>證交稅率（%，股票 0.3、ETF 0.1）</span>
+        <input type="number" name="taxRate" min="0" step="any" required>
+      </label>
+
+      <footer class="dialog-foot">
+        <span class="spacer"></span>
+        <button type="button" class="btn" data-close>取消</button>
+        <button type="submit" class="btn primary">儲存</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <script src="stocks.js"></script>
+</body>
+</html>

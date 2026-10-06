@@ -4,7 +4,10 @@ const LEGACY_TODOS_KEY = "todos";
 const THEME_KEY = "theme";
 
 const DEFAULT_TITLE = "待辦看板";
+const DEFAULT_MOTTO = "今天想完成什麼？";
 const DONE_LIMIT = 10; // 已完成超過這個數量就可以收合
+const TRASH_DAYS = 30; // 垃圾桶保留天數
+const DAY = 86400000;
 
 const COLUMNS = [
   { status: "todo", title: "待辦" },
@@ -22,7 +25,9 @@ const projectsEl = document.getElementById("projects");
 const titleEl = document.getElementById("title");
 const titleText = document.getElementById("title-text");
 const titleEdit = document.getElementById("title-edit");
-const summary = document.getElementById("summary");
+const mottoEl = document.getElementById("motto");
+const mottoText = document.getElementById("motto-text");
+const mottoEdit = document.getElementById("motto-edit");
 const columnTemplate = document.getElementById("column-template");
 const themeToggle = document.getElementById("theme-toggle");
 const themeLabel = document.getElementById("theme-label");
@@ -41,7 +46,13 @@ function newId() {
 }
 
 function makeBoard(name, cards = []) {
-  return { id: newId(), name, cards, projects: [], activeProject: ALL };
+  return { id: newId(), name, cards, projects: [], activeProject: ALL, trash: [] };
+}
+
+// 移除垃圾桶裡超過保留天數的專案
+function purgeTrash(board) {
+  const now = Date.now();
+  board.trash = board.trash.filter((t) => now - t.deletedAt < TRASH_DAYS * DAY);
 }
 
 function defaultState(personalCards = []) {
@@ -52,10 +63,17 @@ function defaultState(personalCards = []) {
 
 // 補齊舊版資料缺少的欄位
 function normalize(s) {
+  // 激勵小語改成每個看板各自一句：原本共用的那句套用到還沒設定的看板
+  if (s.motto) {
+    s.boards.forEach((b) => (b.motto ||= s.motto));
+    delete s.motto;
+  }
   s.boards.forEach((b) => {
     b.cards ||= [];
     b.projects ||= [];
     b.activeProject ||= ALL;
+    b.trash ||= [];
+    purgeTrash(b);
     b.cards.forEach((c) => {
       // 舊版的「優先處理」欄改成：放進待辦並標星號
       if (c.status === "urgent") {
@@ -227,6 +245,8 @@ const ICON_PATHS = {
   notes: '<path d="M15 12h-5"/><path d="M15 8h-5"/><path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/>',
   down: '<path d="m6 9 6 6 6-6"/>',
   up: '<path d="m18 15-6-6-6 6"/>',
+  download: '<path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/>',
+  upload: '<path d="M12 3v12"/><path d="m17 8-5-5-5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>',
   star: '<path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/>',
 };
 
@@ -246,11 +266,11 @@ function iconButton(name, label, onClick, className = "") {
 }
 
 // 把 target 換成輸入框；Enter / 失焦儲存，Esc 取消
-function inlineEdit(target, value, onDone, className = "") {
+function inlineEdit(target, value, onDone, className = "", maxLength = 60) {
   const input = document.createElement("input");
   input.type = "text";
   input.value = value;
-  input.maxLength = 60;
+  input.maxLength = maxLength;
   input.className = className;
 
   let finished = false;
@@ -278,30 +298,15 @@ function render() {
   closeBoardMenu();
   titleText.textContent = state.title || DEFAULT_TITLE;
   document.title = state.title || DEFAULT_TITLE;
+  mottoText.textContent = activeBoard().motto || DEFAULT_MOTTO;
 
   renderTabs();
   renderProjects();
+  renderTrashButton();
   boardEl.replaceChildren(...COLUMNS.map(renderColumn));
 
-  const board = activeBoard();
-  const cards = visibleCards(board);
-  const doneCount = cards.filter((c) => c.status === "done").length;
-  const scope =
-    board.activeProject === ALL ? `「${board.name}」`
-    : board.activeProject === NONE ? `「${board.name} · 未分類」`
-    : `「${board.name} · ${projectName(board, board.activeProject)}」`;
-  const term = (searchTerms.get(board.id) || "").trim();
-  if (term) {
-    summary.textContent = cards.length
-      ? `${scope}搜尋「${term}」：找到 ${cards.length} 張卡片`
-      : `${scope}找不到符合「${term}」的卡片`;
-  } else {
-    summary.textContent = cards.length
-      ? `${scope}共 ${cards.length} 張卡片，已完成 ${doneCount} 張`
-      : `${scope}今天想完成什麼？`;
-  }
-
   // 切換看板時，搜尋框換成該看板的搜尋字
+  const board = activeBoard();
   const value = searchTerms.get(board.id) || "";
   if (searchInput.value !== value) searchInput.value = value;
 }
@@ -391,11 +396,14 @@ function deleteBoard(board) {
 
 /* 專案分類 */
 
+const DOUBLE_CLICK_MS = 500;
+let lastChipClick = { id: null, at: 0 }; // 用來判斷專案標籤是否連點兩下
+
 function renderProjects() {
   const board = activeBoard();
   const chips = [];
 
-  const chip = (id, label, count) => {
+  const chip = (id, label, count, onDoubleClick) => {
     const active = board.activeProject === id;
     const wrap = document.createElement("div");
     wrap.className = "chip" + (active ? " active" : "");
@@ -410,13 +418,22 @@ function renderProjects() {
     num.textContent = count;
     btn.append(num);
     btn.addEventListener("click", () => {
+      // 第一下點擊會重新繪製標籤，瀏覽器的 dblclick 不會觸發，所以自己判斷連點兩下
+      const now = Date.now();
+      const isDouble = lastChipClick.id === id && now - lastChipClick.at < DOUBLE_CLICK_MS;
+      lastChipClick = isDouble ? { id: null, at: 0 } : { id, at: now };
+      if (isDouble && onDoubleClick) {
+        onDoubleClick(btn);
+        return;
+      }
+      if (active) return;
       board.activeProject = id;
       update();
     });
     wrap.append(btn);
 
-    // 把卡片拖到專案標籤上就能換專案
-    if (id !== ALL) {
+    // 把卡片拖到專案標籤上就能換專案（不能拖回未分類）
+    if (id !== ALL && id !== NONE) {
       wrap.addEventListener("dragover", (e) => {
         if (!draggingId) return;
         e.preventDefault();
@@ -431,8 +448,7 @@ function renderProjects() {
         e.preventDefault();
         const card = board.cards.find((c) => c.id === draggingId);
         if (!card) return;
-        if (id === NONE) delete card.projectId;
-        else card.projectId = id;
+        card.projectId = id;
         touch(card);
         draggingId = null; // 重新繪製後原本的卡片元素會被移除，dragend 不一定會觸發
         update();
@@ -445,20 +461,14 @@ function renderProjects() {
 
   sortedProjects(board).forEach((project) => {
     const count = board.cards.filter((c) => c.projectId === project.id).length;
-    const { wrap, btn } = chip(project.id, project.name, count);
-    btn.addEventListener("dblclick", () => renameProject(project, btn));
-    if (board.activeProject === project.id) {
-      wrap.append(
-        iconButton("edit", "重新命名專案", () => renameProject(project, btn)),
-        iconButton("trash", "刪除專案", () => deleteProject(project))
-      );
-    }
+    const { wrap, btn } = chip(project.id, project.name, count, (el) => renameProject(project, el));
+    btn.title = "點兩下可以重新命名";
     chips.push(wrap);
   });
 
+  // 新卡片一定有專案；舊資料或還原後還有沒專案的卡片時，才顯示「未分類」
   const uncategorized = board.cards.filter((c) => !projectName(board, c.projectId)).length;
-  // 有專案時就顯示「未分類」，也方便把卡片拖回未分類
-  if (board.projects.length) {
+  if (board.projects.length && (uncategorized || board.activeProject === NONE)) {
     chips.push(chip(NONE, "未分類", uncategorized).wrap);
   }
 
@@ -492,18 +502,120 @@ function addProject() {
   renameProject(project, projectsEl.querySelector(".chip.active .chip-name"));
 }
 
-function deleteProject(project) {
+// 專案連同裡面的卡片一起移到垃圾桶，30 天內可以還原
+function trashProject(project) {
   const board = activeBoard();
-  const count = board.cards.filter((c) => c.projectId === project.id).length;
-  const detail = count ? `\n裡面的 ${count} 張卡片不會被刪除，會改成「未分類」。` : "";
-  if (!confirm(`確定要刪除專案「${project.name}」嗎？${detail}`)) return;
+  const cards = board.cards.filter((c) => c.projectId === project.id);
+  const detail = cards.length ? `\n裡面的 ${cards.length} 張卡片也會一起移過去。` : "";
+  if (!confirm(`要把專案「${project.name}」丟進垃圾桶嗎？${detail}\n${TRASH_DAYS} 天內可以從垃圾桶還原。`)) return;
+  board.trash.unshift({ id: project.id, name: project.name, cards, deletedAt: Date.now() });
   board.projects = board.projects.filter((p) => p.id !== project.id);
-  board.cards.forEach((c) => {
-    if (c.projectId === project.id) delete c.projectId;
-  });
+  board.cards = board.cards.filter((c) => c.projectId !== project.id);
   board.activeProject = ALL;
   update();
 }
+
+/* 垃圾桶 */
+
+const trashBtn = document.getElementById("trash-btn");
+const trashDialog = document.getElementById("trash-dialog");
+
+// 右上角的垃圾桶：在某個專案底下時丟棄該專案，其他時候打開垃圾桶清單
+function renderTrashButton() {
+  const board = activeBoard();
+  const project = board.projects.find((p) => p.id === board.activeProject);
+  const label = project ? `把專案「${project.name}」丟進垃圾桶` : `打開垃圾桶（${board.trash.length} 個專案）`;
+  trashBtn.innerHTML = icon("trash");
+  trashBtn.title = label;
+  trashBtn.setAttribute("aria-label", label);
+  if (board.trash.length) {
+    const num = document.createElement("span");
+    num.className = "chip-count";
+    num.textContent = board.trash.length;
+    trashBtn.append(num);
+  }
+}
+
+trashBtn.addEventListener("click", () => {
+  const board = activeBoard();
+  const project = board.projects.find((p) => p.id === board.activeProject);
+  if (project) trashProject(project);
+  else openTrash();
+});
+const trashList = document.getElementById("trash-list");
+const trashEmpty = document.getElementById("trash-empty");
+
+function openTrash() {
+  purgeTrash(activeBoard());
+  renderTrash();
+  trashDialog.showModal();
+}
+
+function renderTrash() {
+  const board = activeBoard();
+  trashEmpty.hidden = board.trash.length === 0;
+  if (!board.trash.length) {
+    const empty = document.createElement("li");
+    empty.className = "trash-empty";
+    empty.textContent = "垃圾桶是空的";
+    trashList.replaceChildren(empty);
+    return;
+  }
+
+  trashList.replaceChildren(...board.trash.map((item) => {
+    const li = document.createElement("li");
+    li.className = "trash-item";
+
+    const info = document.createElement("div");
+    info.className = "trash-info";
+    const name = document.createElement("strong");
+    name.textContent = item.name;
+    const date = new Date(item.deletedAt);
+    const daysLeft = Math.max(1, Math.ceil((item.deletedAt + TRASH_DAYS * DAY - Date.now()) / DAY));
+    const meta = document.createElement("span");
+    meta.className = "trash-meta";
+    meta.textContent = `${item.cards.length} 張卡片 · ${date.getMonth() + 1}/${date.getDate()} 丟棄 · ${daysLeft} 天後永久刪除`;
+    info.append(name, meta);
+
+    const restore = document.createElement("button");
+    restore.type = "button";
+    restore.className = "btn";
+    restore.textContent = "還原";
+    restore.addEventListener("click", () => {
+      board.trash = board.trash.filter((t) => t !== item);
+      board.projects.push({ id: item.id, name: item.name });
+      board.cards.push(...item.cards);
+      update();
+      renderTrash();
+    });
+
+    const remove = iconButton("close", "永久刪除", () => {
+      const detail = item.cards.length ? `和裡面的 ${item.cards.length} 張卡片` : "";
+      if (!confirm(`確定要永久刪除專案「${item.name}」${detail}嗎？刪除後無法復原。`)) return;
+      board.trash = board.trash.filter((t) => t !== item);
+      update();
+      renderTrash();
+    });
+
+    li.append(info, restore, remove);
+    return li;
+  }));
+}
+
+trashEmpty.addEventListener("click", () => {
+  const board = activeBoard();
+  if (!confirm(`確定要清空垃圾桶嗎？裡面的 ${board.trash.length} 個專案會永久刪除，無法復原。`)) return;
+  board.trash = [];
+  update();
+  renderTrash();
+});
+
+document.getElementById("trash-close").innerHTML = icon("close");
+document.getElementById("trash-close").addEventListener("click", () => trashDialog.close());
+document.getElementById("trash-done").addEventListener("click", () => trashDialog.close());
+trashDialog.addEventListener("click", (e) => {
+  if (e.target === trashDialog) trashDialog.close();
+});
 
 /* 標題 */
 
@@ -521,6 +633,25 @@ function startTitleEdit() {
 titleEdit.innerHTML = icon("edit");
 titleEdit.addEventListener("click", startTitleEdit);
 titleText.addEventListener("dblclick", startTitleEdit);
+
+/* 激勵小語（標題下方，每個看板各自一句） */
+
+function startMottoEdit() {
+  const board = activeBoard();
+  mottoEl.classList.add("editing");
+  inlineEdit(mottoText, board.motto || DEFAULT_MOTTO, (value) => {
+    // 清空時恢復預設文字
+    if (value && value !== DEFAULT_MOTTO) board.motto = value;
+    else delete board.motto;
+    mottoEl.querySelector("input")?.replaceWith(mottoText);
+    mottoEl.classList.remove("editing");
+    update();
+  }, "motto-input", 100);
+}
+
+mottoEdit.innerHTML = icon("edit");
+mottoEdit.addEventListener("click", startMottoEdit);
+mottoText.addEventListener("dblclick", startMottoEdit);
 
 /* 欄位 */
 
@@ -570,16 +701,17 @@ function renderColumn({ status, title }) {
     });
   }
 
+  // 卡片一定要屬於某個專案：只有選了專案才能新增
   const form = column.querySelector(".add-form");
   const input = form.querySelector("input");
+  const canAdd = board.projects.some((p) => p.id === board.activeProject);
+  form.hidden = !canAdd;
   input.setAttribute("aria-label", `在「${title}」新增卡片`);
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     const text = input.value.trim();
-    if (!text) return;
-    const card = { id: newId(), text, status, updatedAt: Date.now() };
-    // 正在看某個專案時，新卡片直接歸到該專案
-    if (![ALL, NONE].includes(board.activeProject)) card.projectId = board.activeProject;
+    if (!text || !canAdd) return;
+    const card = { id: newId(), text, status, updatedAt: Date.now(), projectId: board.activeProject };
     if (status === "done") board.cards.splice(Math.max(0, board.cards.findIndex((c) => c.status === "done")), 0, card);
     else board.cards.push(card);
     update();
@@ -734,11 +866,13 @@ function openCardDialog(card) {
   fieldDue.value = card.due || "";
   fieldStatus.value = card.status;
 
+  // 只有原本就沒專案的舊卡片才保留「未分類」選項
+  const hasProject = !!projectName(board, card.projectId);
   fieldProject.replaceChildren(
-    new Option("未分類", ""),
+    ...(hasProject ? [] : [new Option("未分類", "")]),
     ...sortedProjects(board).map((p) => new Option(p.name, p.id))
   );
-  fieldProject.value = projectName(board, card.projectId) ? card.projectId : "";
+  fieldProject.value = hasProject ? card.projectId : "";
   fieldProject.closest(".field").hidden = board.projects.length === 0;
 
   dialog.showModal();
@@ -782,10 +916,11 @@ document.getElementById("dialog-delete").addEventListener("click", () => {
   update();
 });
 dialog.addEventListener("close", () => (editingCard = null));
-// 點視窗外的遮罩也可以關閉
-dialog.addEventListener("click", (e) => {
-  if (e.target === dialog) closeCardDialog();
+// 只能按儲存、取消或關閉鈕離開，避免點到外面或按 Esc 時打好的內容不見
+dialog.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") e.preventDefault();
 });
+dialog.addEventListener("cancel", (e) => e.preventDefault());
 
 /* ---------- 移到其他看板的選單 ---------- */
 
@@ -851,31 +986,41 @@ function openBoardMenu(button, card) {
     menu.append(btn);
   };
 
+  const separator = () => {
+    if (menu.childElementCount) menu.append(Object.assign(document.createElement("hr"), { className: "menu-sep" }));
+  };
+
   // 同一個看板內換專案
   if (board.projects.length) {
     heading("移到專案");
-    const currentProject = projectName(board, card.projectId) ? card.projectId : null;
     sortedProjects(board).forEach((project) => {
-      item(project.name, currentProject === project.id, () => (card.projectId = project.id));
+      item(project.name, card.projectId === project.id, () => (card.projectId = project.id));
     });
-    item("未分類", currentProject === null, () => delete card.projectId);
   }
 
-  // 移到其他看板
-  const others = state.boards.filter((b) => b.id !== state.activeId);
-  if (others.length) {
-    if (board.projects.length) menu.append(Object.assign(document.createElement("hr"), { className: "menu-sep" }));
-    heading("移到看板");
-    others.forEach((target) => {
-      item(target.name, false, () => {
-        removeCard(card.id);
-        delete card.projectId; // 專案屬於各自的看板，移過去後改為未分類
-        const status = card.status;
-        card.status = null; // 讓 placeCard 視為換欄，「已完成」會放到最上面
-        placeCard(target, card, status);
+  // 移到其他看板：要選定那個看板裡的專案
+  state.boards
+    .filter((b) => b.id !== state.activeId)
+    .forEach((target) => {
+      separator();
+      heading(`移到「${target.name}」`);
+      if (!target.projects.length) {
+        const note = document.createElement("div");
+        note.className = "menu-note";
+        note.textContent = "這個看板還沒有專案";
+        menu.append(note);
+        return;
+      }
+      sortedProjects(target).forEach((project) => {
+        item(project.name, false, () => {
+          removeCard(card.id);
+          card.projectId = project.id;
+          const status = card.status;
+          card.status = null; // 讓 placeCard 視為換欄，「已完成」會放到最上面
+          placeCard(target, card, status);
+        });
       });
     });
-  }
 
   document.body.append(menu);
 
@@ -957,6 +1102,101 @@ function getPlaceholder() {
 function removePlaceholders() {
   placeholderEl?.remove();
 }
+
+/* ---------- 匯出／匯入 ---------- */
+
+const exportBtn = document.getElementById("export-btn");
+const importBtn = document.getElementById("import-btn");
+const importFile = document.getElementById("import-file");
+exportBtn.innerHTML = icon("download");
+importBtn.innerHTML = icon("upload");
+
+function todayString() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// 下載目前所有看板資料為 JSON 檔
+exportBtn.addEventListener("click", () => {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  // 檔名去掉 Windows 不允許的字元
+  const name = (state.title || DEFAULT_TITLE).replace(/[\\/:*?"<>|]/g, "").trim() || DEFAULT_TITLE;
+  a.href = url;
+  a.download = `${name}-${todayString()}.json`;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+});
+
+// 檢查匯入的資料格式，並整理成可用的狀態；格式不對時回傳 null
+function parseImport(data) {
+  if (!data || typeof data !== "object" || !Array.isArray(data.boards)) return null;
+  const str = (v) => (typeof v === "string" ? v.trim() : "");
+  const parseCards = (list) =>
+    (Array.isArray(list) ? list : [])
+      .filter((c) => c && str(c.text))
+      .map((c) => {
+        const card = { id: str(c.id) || newId(), text: str(c.text), status: str(c.status) };
+        if (str(c.notes)) card.notes = str(c.notes);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(str(c.due))) card.due = str(c.due);
+        if (str(c.projectId)) card.projectId = str(c.projectId);
+        if (c.starred) card.starred = true;
+        if (Number.isFinite(c.updatedAt)) card.updatedAt = c.updatedAt;
+        return card;
+      });
+  const boards = data.boards
+    .filter((b) => b && typeof b === "object")
+    .map((b) => ({
+      id: str(b.id) || newId(),
+      name: str(b.name) || "未命名看板",
+      ...(str(b.motto) && { motto: str(b.motto) }),
+      activeProject: str(b.activeProject) || ALL,
+      projects: (Array.isArray(b.projects) ? b.projects : [])
+        .filter((p) => p && str(p.id) && str(p.name))
+        .map((p) => ({ id: str(p.id), name: str(p.name) })),
+      cards: parseCards(b.cards),
+      trash: (Array.isArray(b.trash) ? b.trash : [])
+        .filter((t) => t && str(t.id) && str(t.name) && Number.isFinite(t.deletedAt))
+        .map((t) => ({ id: str(t.id), name: str(t.name), deletedAt: t.deletedAt, cards: parseCards(t.cards) })),
+    }));
+  if (!boards.length) return null;
+  const result = { title: str(data.title) || DEFAULT_TITLE, activeId: str(data.activeId), boards };
+  if (str(data.motto)) result.motto = str(data.motto);
+  return normalize(result);
+}
+
+importBtn.addEventListener("click", () => importFile.click());
+
+importFile.addEventListener("change", async () => {
+  const file = importFile.files[0];
+  importFile.value = ""; // 讓同一個檔案可以再選一次
+  if (!file) return;
+
+  let imported = null;
+  try {
+    imported = parseImport(JSON.parse(await file.text()));
+  } catch {}
+  if (!imported) {
+    alert("無法匯入：這個檔案不是待辦看板的備份檔。");
+    return;
+  }
+
+  const count = imported.boards.reduce((n, b) => n + b.cards.length, 0);
+  const message =
+    `要匯入「${file.name}」嗎？\n` +
+    `內含 ${imported.boards.length} 個看板、${count} 張卡片。\n\n` +
+    `匯入後會取代目前瀏覽器裡的所有看板資料，建議先按「匯出」備份。`;
+  if (!confirm(message)) return;
+
+  state = imported;
+  searchTerms.clear();
+  expandedDone.clear();
+  update();
+});
 
 /* ---------- 深色模式 ---------- */
 
