@@ -46,7 +46,7 @@ function newId() {
 }
 
 function makeBoard(name, cards = []) {
-  return { id: newId(), name, cards, projects: [], activeProject: ALL, trash: [] };
+  return { id: newId(), name, cards, projects: [], activeProject: ALL, trash: [], archive: [] };
 }
 
 // 移除垃圾桶裡超過保留天數的專案
@@ -73,8 +73,10 @@ function normalize(s) {
     b.projects ||= [];
     b.activeProject ||= ALL;
     b.trash ||= [];
+    b.archive ||= [];
     purgeTrash(b);
-    b.cards.forEach((c) => {
+    // 垃圾桶、封存裡的卡片也要整理，還原後才會正常顯示
+    [b.cards, ...b.trash.map((t) => t.cards), ...b.archive.map((a) => a.cards)].flat().forEach((c) => {
       // 舊版的「優先處理」欄改成：放進待辦並標星號
       if (c.status === "urgent") {
         c.status = "todo";
@@ -245,6 +247,8 @@ const ICON_PATHS = {
   notes: '<path d="M15 12h-5"/><path d="M15 8h-5"/><path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/>',
   down: '<path d="m6 9 6 6 6-6"/>',
   up: '<path d="m18 15-6-6-6 6"/>',
+  memo: '<path d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8Z"/><path d="M15 3v4a2 2 0 0 0 2 2h4"/>',
+  archive: '<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
   download: '<path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/>',
   upload: '<path d="M12 3v12"/><path d="m17 8-5-5-5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>',
   star: '<path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/>',
@@ -303,6 +307,8 @@ function render() {
   renderTabs();
   renderProjects();
   renderTrashButton();
+  renderArchiveButton();
+  renderMemoButton();
   boardEl.replaceChildren(...COLUMNS.map(renderColumn));
 
   // 切換看板時，搜尋框換成該看板的搜尋字
@@ -385,7 +391,8 @@ function deleteBoard(board) {
     alert("至少要保留一個看板。");
     return;
   }
-  const count = board.cards.length;
+  // 封存區的卡片也算在內
+  const count = board.cards.length + board.archive.reduce((n, a) => n + a.cards.length, 0);
   const detail = count ? `，裡面的 ${count} 張卡片也會一起刪除` : "";
   if (!confirm(`確定要刪除看板「${board.name}」嗎${detail}？`)) return;
   const index = state.boards.indexOf(board);
@@ -508,12 +515,208 @@ function trashProject(project) {
   const cards = board.cards.filter((c) => c.projectId === project.id);
   const detail = cards.length ? `\n裡面的 ${cards.length} 張卡片也會一起移過去。` : "";
   if (!confirm(`要把專案「${project.name}」丟進垃圾桶嗎？${detail}\n${TRASH_DAYS} 天內可以從垃圾桶還原。`)) return;
-  board.trash.unshift({ id: project.id, name: project.name, cards, deletedAt: Date.now() });
+  board.trash.unshift({ id: project.id, name: project.name, ...memoFields(project), cards, deletedAt: Date.now() });
   board.projects = board.projects.filter((p) => p.id !== project.id);
   board.cards = board.cards.filter((c) => c.projectId !== project.id);
   board.activeProject = ALL;
   update();
 }
+
+/* 專案備忘錄：記錄不可變動、需要注意的事項 */
+
+// 複製備忘錄欄位（丟進垃圾桶、還原、匯入時共用）
+function memoFields(source) {
+  if (!source.memo) return {};
+  const fields = { memo: source.memo };
+  if (Number.isFinite(source.memoUpdatedAt)) fields.memoUpdatedAt = source.memoUpdatedAt;
+  return fields;
+}
+
+const memoDialog = document.getElementById("memo-dialog");
+const memoForm = document.getElementById("memo-form");
+const memoText = document.getElementById("memo-text");
+const memoMeta = document.getElementById("memo-meta");
+let memoProject = null;
+
+function openMemo(project) {
+  memoProject = project;
+  document.getElementById("memo-title").textContent = `「${project.name}」備忘錄`;
+  memoText.value = project.memo || "";
+  if (project.memoUpdatedAt) {
+    const d = new Date(project.memoUpdatedAt);
+    const time = `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+    memoMeta.textContent = `最後更新：${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${time}`;
+  } else {
+    memoMeta.textContent = "";
+  }
+  memoDialog.showModal();
+  memoText.focus();
+  memoText.setSelectionRange(memoText.value.length, memoText.value.length);
+  memoText.scrollTop = 0;
+}
+
+memoForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const project = memoProject;
+  if (!project) return;
+  const value = memoText.value.trim();
+  if (value !== (project.memo || "")) {
+    if (value) {
+      project.memo = value;
+      project.memoUpdatedAt = Date.now();
+    } else {
+      delete project.memo;
+      delete project.memoUpdatedAt;
+    }
+  }
+  memoDialog.close();
+  update();
+});
+
+document.getElementById("memo-close").innerHTML = icon("close");
+document.getElementById("memo-close").addEventListener("click", () => memoDialog.close());
+document.getElementById("memo-cancel").addEventListener("click", () => memoDialog.close());
+memoDialog.addEventListener("close", () => (memoProject = null));
+// 只能按儲存、取消或關閉鈕離開，避免點到外面或按 Esc 時打好的內容不見
+memoDialog.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") e.preventDefault();
+});
+memoDialog.addEventListener("cancel", (e) => e.preventDefault());
+
+/* 右上角的專案工具：封存、備忘錄、垃圾桶 */
+
+// 目前正在看的專案（「全部」「未分類」時為 undefined）
+function currentProject(board) {
+  return board.projects.find((p) => p.id === board.activeProject);
+}
+
+// 圖示按鈕，數量大於 0 時旁邊顯示數字
+function setCountButton(btn, iconName, label, count) {
+  btn.innerHTML = icon(iconName);
+  btn.title = label;
+  btn.setAttribute("aria-label", label);
+  if (count) {
+    const num = document.createElement("span");
+    num.className = "chip-count";
+    num.textContent = count;
+    btn.append(num);
+  }
+}
+
+// 備忘錄：要先選專案；有內容時圖示較明顯，滑鼠停留可預覽
+const memoBtn = document.getElementById("memo-btn");
+memoBtn.innerHTML = icon("memo");
+
+function renderMemoButton() {
+  const project = currentProject(activeBoard());
+  const label = !project
+    ? "選擇專案後可查看備忘錄"
+    : project.memo
+      ? `「${project.name}」備忘錄（點一下查看或編輯）\n\n${project.memo.slice(0, 300)}`
+      : `新增「${project.name}」的備忘錄`;
+  memoBtn.title = label;
+  memoBtn.setAttribute("aria-label", project ? `「${project.name}」備忘錄` : label);
+  memoBtn.disabled = !project;
+  memoBtn.classList.toggle("has-memo", !!project?.memo);
+}
+
+memoBtn.addEventListener("click", () => {
+  const project = currentProject(activeBoard());
+  if (project) openMemo(project);
+});
+
+/* 封存：專案連同卡片、備忘錄從看板上隱藏，不會自動刪除 */
+
+const archiveBtn = document.getElementById("archive-btn");
+const archiveDialog = document.getElementById("archive-dialog");
+const archiveList = document.getElementById("archive-list");
+
+function renderArchiveButton() {
+  const board = activeBoard();
+  const project = currentProject(board);
+  setCountButton(archiveBtn, "archive", project ? `封存專案「${project.name}」` : `查看封存的專案（${board.archive.length} 個）`, board.archive.length);
+}
+
+archiveBtn.addEventListener("click", () => {
+  const project = currentProject(activeBoard());
+  if (project) archiveProject(project);
+  else openArchive();
+});
+
+function archiveProject(project) {
+  const board = activeBoard();
+  const cards = board.cards.filter((c) => c.projectId === project.id);
+  const detail = cards.length ? `（含 ${cards.length} 張卡片）` : "";
+  if (!confirm(`要封存專案「${project.name}」嗎？\n封存後會從看板上隱藏${detail}，不會被刪除，之後可以按封存圖示取消封存。`)) return;
+  board.archive.unshift({ id: project.id, name: project.name, ...memoFields(project), cards, archivedAt: Date.now() });
+  board.projects = board.projects.filter((p) => p.id !== project.id);
+  board.cards = board.cards.filter((c) => c.projectId !== project.id);
+  board.activeProject = ALL;
+  update();
+}
+
+function openArchive() {
+  renderArchive();
+  archiveDialog.showModal();
+}
+
+function renderArchive() {
+  const board = activeBoard();
+  if (!board.archive.length) {
+    const empty = document.createElement("li");
+    empty.className = "trash-empty";
+    empty.textContent = "沒有封存的專案";
+    archiveList.replaceChildren(empty);
+    return;
+  }
+
+  archiveList.replaceChildren(...board.archive.map((item) => {
+    const li = document.createElement("li");
+    li.className = "trash-item";
+
+    const info = document.createElement("div");
+    info.className = "trash-info";
+    const name = document.createElement("strong");
+    name.textContent = item.name;
+    const date = new Date(item.archivedAt);
+    const meta = document.createElement("span");
+    meta.className = "trash-meta";
+    meta.textContent = `${item.cards.length} 張卡片 · ${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()} 封存${item.memo ? " · 有備忘錄" : ""}`;
+    if (item.memo) meta.title = item.memo;
+    info.append(name, meta);
+
+    const restore = document.createElement("button");
+    restore.type = "button";
+    restore.className = "btn";
+    restore.textContent = "取消封存";
+    restore.addEventListener("click", () => {
+      board.archive = board.archive.filter((a) => a !== item);
+      board.projects.push({ id: item.id, name: item.name, ...memoFields(item) });
+      board.cards.push(...item.cards);
+      update();
+      renderArchive();
+    });
+
+    // 不要了可以直接從封存移到垃圾桶
+    const toTrash = iconButton("trash", "丟進垃圾桶", () => {
+      if (!confirm(`要把封存的專案「${item.name}」丟進垃圾桶嗎？\n${TRASH_DAYS} 天內可以從垃圾桶還原。`)) return;
+      board.archive = board.archive.filter((a) => a !== item);
+      board.trash.unshift({ id: item.id, name: item.name, ...memoFields(item), cards: item.cards, deletedAt: Date.now() });
+      update();
+      renderArchive();
+    });
+
+    li.append(info, restore, toTrash);
+    return li;
+  }));
+}
+
+document.getElementById("archive-close").innerHTML = icon("close");
+document.getElementById("archive-close").addEventListener("click", () => archiveDialog.close());
+document.getElementById("archive-done").addEventListener("click", () => archiveDialog.close());
+archiveDialog.addEventListener("click", (e) => {
+  if (e.target === archiveDialog) archiveDialog.close();
+});
 
 /* 垃圾桶 */
 
@@ -523,22 +726,12 @@ const trashDialog = document.getElementById("trash-dialog");
 // 右上角的垃圾桶：在某個專案底下時丟棄該專案，其他時候打開垃圾桶清單
 function renderTrashButton() {
   const board = activeBoard();
-  const project = board.projects.find((p) => p.id === board.activeProject);
-  const label = project ? `把專案「${project.name}」丟進垃圾桶` : `打開垃圾桶（${board.trash.length} 個專案）`;
-  trashBtn.innerHTML = icon("trash");
-  trashBtn.title = label;
-  trashBtn.setAttribute("aria-label", label);
-  if (board.trash.length) {
-    const num = document.createElement("span");
-    num.className = "chip-count";
-    num.textContent = board.trash.length;
-    trashBtn.append(num);
-  }
+  const project = currentProject(board);
+  setCountButton(trashBtn, "trash", project ? `把專案「${project.name}」丟進垃圾桶` : `打開垃圾桶（${board.trash.length} 個專案）`, board.trash.length);
 }
 
 trashBtn.addEventListener("click", () => {
-  const board = activeBoard();
-  const project = board.projects.find((p) => p.id === board.activeProject);
+  const project = currentProject(activeBoard());
   if (project) trashProject(project);
   else openTrash();
 });
@@ -583,7 +776,7 @@ function renderTrash() {
     restore.textContent = "還原";
     restore.addEventListener("click", () => {
       board.trash = board.trash.filter((t) => t !== item);
-      board.projects.push({ id: item.id, name: item.name });
+      board.projects.push({ id: item.id, name: item.name, ...memoFields(item) });
       board.cards.push(...item.cards);
       update();
       renderTrash();
@@ -1157,11 +1350,26 @@ function parseImport(data) {
       activeProject: str(b.activeProject) || ALL,
       projects: (Array.isArray(b.projects) ? b.projects : [])
         .filter((p) => p && str(p.id) && str(p.name))
-        .map((p) => ({ id: str(p.id), name: str(p.name) })),
+        .map((p) => ({ id: str(p.id), name: str(p.name), ...memoFields({ memo: str(p.memo), memoUpdatedAt: p.memoUpdatedAt }) })),
       cards: parseCards(b.cards),
       trash: (Array.isArray(b.trash) ? b.trash : [])
         .filter((t) => t && str(t.id) && str(t.name) && Number.isFinite(t.deletedAt))
-        .map((t) => ({ id: str(t.id), name: str(t.name), deletedAt: t.deletedAt, cards: parseCards(t.cards) })),
+        .map((t) => ({
+          id: str(t.id),
+          name: str(t.name),
+          ...memoFields({ memo: str(t.memo), memoUpdatedAt: t.memoUpdatedAt }),
+          deletedAt: t.deletedAt,
+          cards: parseCards(t.cards),
+        })),
+      archive: (Array.isArray(b.archive) ? b.archive : [])
+        .filter((a) => a && str(a.id) && str(a.name) && Number.isFinite(a.archivedAt))
+        .map((a) => ({
+          id: str(a.id),
+          name: str(a.name),
+          ...memoFields({ memo: str(a.memo), memoUpdatedAt: a.memoUpdatedAt }),
+          archivedAt: a.archivedAt,
+          cards: parseCards(a.cards),
+        })),
     }));
   if (!boards.length) return null;
   const result = { title: str(data.title) || DEFAULT_TITLE, activeId: str(data.activeId), boards };

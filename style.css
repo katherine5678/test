@@ -610,6 +610,12 @@ input[type="text"]:focus {
 }
 
 
+/* 右上角備忘錄圖示：沒選專案時停用；有內容時以實心標示 */
+#memo-btn:disabled { opacity: 0.35; cursor: default; transform: none; color: var(--muted); }
+#memo-btn.has-memo svg { fill: color-mix(in srgb, currentColor 18%, transparent); }
+
+.memo-meta { font-size: 0.75rem; color: var(--muted); }
+
 .chip input.chip-input {
   width: 130px;
   padding: 2px 10px;
@@ -629,8 +635,8 @@ input[type="text"]:focus {
 
 .chip-add:hover { color: var(--text); }
 
-/* 右上角垃圾桶按鈕：有東西時旁邊顯示數量 */
-.icon-btn.trash-btn {
+/* 右上角封存、垃圾桶按鈕：有東西時旁邊顯示數量 */
+.icon-btn.count-btn {
   width: auto;
   min-width: 32px;
   gap: 3px;

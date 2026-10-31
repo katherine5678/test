@@ -220,8 +220,16 @@ function stockNames() {
   return names;
 }
 
+// 內建的台股代號表（stock-names.js）；檔案不存在時當作空的
+const BUILTIN_NAMES = typeof STOCK_NAMES === "object" ? STOCK_NAMES : {};
+
+// 自己填過的名稱優先，沒有再查內建代號表
+function lookupName(symbol, names = stockNames()) {
+  return names.get(symbol) || BUILTIN_NAMES[symbol] || "";
+}
+
 function stockLabel(names, symbol) {
-  const name = names.get(symbol);
+  const name = lookupName(symbol, names);
   return name ? `${symbol} ${name}` : symbol;
 }
 
@@ -422,11 +430,25 @@ function renderToolbar(names, range) {
     ...symbols.map((s) => new Option(stockLabel(names, s), s))
   );
   symbolFilter.value = state.view.symbol;
-  symbolList.replaceChildren(...symbols.map((s) => new Option(names.get(s) || "", s)));
+  renderSymbolList(names, symbols);
   bankList.replaceChildren(...bankSummary().map(([bank]) => new Option("", bank)));
 
   const filter = state.view.symbol ? ` · ${stockLabel(names, state.view.symbol)}` : "";
   rangeLabel.textContent = `${rangeText(range)}${filter}`;
+}
+
+// 代號輸入的下拉建議：自己用過的排前面，再接內建代號表（可用代號或名稱搜尋）
+// 內建表有兩千多筆，只在用過的代號有變動時才重建
+let symbolListKey = null;
+function renderSymbolList(names, symbols) {
+  const key = symbols.map((s) => `${s}:${names.get(s)}`).join("|");
+  if (key === symbolListKey) return;
+  symbolListKey = key;
+  const used = new Set(symbols);
+  symbolList.replaceChildren(
+    ...symbols.map((s) => new Option(lookupName(s, names), s)),
+    ...Object.entries(BUILTIN_NAMES).filter(([code]) => !used.has(code)).map(([code, name]) => new Option(name, code))
+  );
 }
 
 function renderStats(trades, dividends, transfers, ledger) {
@@ -712,14 +734,29 @@ function setupDialog(dialog) {
   dialog.addEventListener("cancel", (e) => e.preventDefault());
 }
 
-// 輸入代號後，名稱空白時自動帶入之前用過的名稱
+// 輸入代號時自動帶入名稱（自己填過的優先，其次內建代號表）
+// 名稱是自動帶入的就會跟著代號更新；手動改過名稱後就不再覆蓋
 function autoFillName(form) {
-  form.elements.symbol.addEventListener("change", () => {
-    const symbol = form.elements.symbol.value.trim().toUpperCase();
-    form.elements.symbol.value = symbol;
-    const name = stockNames().get(symbol);
-    if (name && !form.elements.name.value.trim()) form.elements.name.value = name;
+  const { symbol, name } = form.elements;
+  const fill = () => {
+    if (name.value.trim() && !name.dataset.auto) return;
+    const found = lookupName(symbol.value.trim().toUpperCase());
+    name.value = found;
+    if (found) name.dataset.auto = "1";
+    else delete name.dataset.auto;
+  };
+  symbol.addEventListener("input", fill);
+  symbol.addEventListener("change", () => {
+    symbol.value = symbol.value.trim().toUpperCase();
+    fill();
   });
+  name.addEventListener("input", () => delete name.dataset.auto);
+}
+
+// 開啟視窗時重設自動帶入的狀態
+function resetAutoName(form, auto = false) {
+  if (auto) form.elements.name.dataset.auto = "1";
+  else delete form.elements.name.dataset.auto;
 }
 
 /* ---------- 交易視窗 ---------- */
@@ -777,6 +814,7 @@ function openTradeDialog(trade = null) {
   document.getElementById("trade-title").textContent = trade ? "編輯交易" : "新增交易";
   delete f.fee.dataset.manual;
   delete f.tax.dataset.manual;
+  resetAutoName(tradeForm);
 
   if (trade) {
     f.side.value = trade.side;
@@ -795,7 +833,8 @@ function openTradeDialog(trade = null) {
     f.date.value = todayString();
     if (state.view.symbol) {
       f.symbol.value = state.view.symbol;
-      f.name.value = stockNames().get(state.view.symbol) || "";
+      f.name.value = lookupName(state.view.symbol);
+      resetAutoName(tradeForm, true);
     }
   }
   recalcTrade();
@@ -852,6 +891,7 @@ function openDividendDialog(dividend = null) {
   const f = dividendForm.elements;
   dividendForm.reset();
   document.getElementById("dividend-title").textContent = dividend ? "編輯股利" : "新增股利";
+  resetAutoName(dividendForm);
   if (dividend) {
     f.date.value = dividend.date;
     f.symbol.value = dividend.symbol;
@@ -863,7 +903,8 @@ function openDividendDialog(dividend = null) {
     f.date.value = todayString();
     if (state.view.symbol) {
       f.symbol.value = state.view.symbol;
-      f.name.value = stockNames().get(state.view.symbol) || "";
+      f.name.value = lookupName(state.view.symbol);
+      resetAutoName(dividendForm, true);
     }
   }
   dividendDialog.showModal();
@@ -1225,7 +1266,7 @@ function buildReport() {
       ...trades.map((t) => {
         const r = ledger.realized.get(t.id);
         return [
-          t.date, t.symbol, names.get(t.symbol) || "", t.side === "buy" ? "買進" : "賣出",
+          t.date, t.symbol, lookupName(t.symbol, names), t.side === "buy" ? "買進" : "賣出",
           int(t.shares), dec(t.price), int(tradeAmount(t)), int(t.fee), int(t.tax), int(tradeNet(t)),
           r === undefined ? "" : int(r), t.note,
         ];
@@ -1238,7 +1279,7 @@ function buildReport() {
     widths: [12, 10, 14, 14, 12, 24],
     rows: [
       head(["發放日期", "代號", "名稱", "現金股利", "配股（股）", "備註"]),
-      ...dividends.map((d) => [d.date, d.symbol, names.get(d.symbol) || "", dec(d.cash), d.stockShares ? int(d.stockShares) : "", d.note]),
+      ...dividends.map((d) => [d.date, d.symbol, lookupName(d.symbol, names), dec(d.cash), d.stockShares ? int(d.stockShares) : "", d.note]),
     ],
   };
 
@@ -1247,7 +1288,7 @@ function buildReport() {
     let sum = 0;
     [...stocks.entries()].sort(([a], [b]) => a.localeCompare(b)).forEach(([symbol, item]) => {
       sum += item.cash;
-      yearlyRows.push([year, symbol, names.get(symbol) || "", int(item.count), int(item.cash), item.stockShares ? int(item.stockShares) : ""]);
+      yearlyRows.push([year, symbol, lookupName(symbol, names), int(item.count), int(item.cash), item.stockShares ? int(item.stockShares) : ""]);
     });
     yearlyRows.push([{ v: `${year} 合計`, s: S.head }, "", "", "", { v: Math.round(sum), s: S.int }, ""]);
   });
@@ -1265,7 +1306,7 @@ function buildReport() {
       const value = price ? pos.shares * price : null;
       const pl = value === null ? null : value - pos.cost;
       return [
-        symbol, names.get(symbol) || "", int(pos.shares), dec(pos.cost / pos.shares), int(pos.cost),
+        symbol, lookupName(symbol, names), int(pos.shares), dec(pos.cost / pos.shares), int(pos.cost),
         price ? dec(price) : "", value === null ? "" : int(value), pl === null ? "" : int(pl),
         pl === null || !pos.cost ? "" : { v: round2(pl / pos.cost * 10000) / 10000, s: S.pct },
       ];
