@@ -1,0 +1,177 @@
+/* 朋友喜好頁（共用 style.css 的顏色變數、頂部、分類標籤、搜尋、對話視窗與按鈕） */
+
+.friends-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.friends-tools .btn { white-space: nowrap; }
+
+@media (max-width: 600px) {
+  .friends-tools { width: 100%; }
+}
+
+#group-delete[hidden] { display: none; }
+#group-delete:hover { color: var(--danger); }
+
+.friends {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+  max-width: 1400px;
+  margin: 0 auto 32px;
+  padding: 0 16px;
+  align-items: start;
+}
+
+.friend {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  cursor: default;
+  transition: box-shadow 0.15s, transform 0.15s;
+}
+
+.friend:hover { box-shadow: var(--shadow-lift); }
+
+.friend-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.friend-name {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 1.05rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.friend-group {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.friend-head .icon-btn { margin-left: auto; flex-shrink: 0; }
+
+.pref {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.pref > svg {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-top: 4px;
+}
+
+.pref.likes > svg { color: var(--urgent); }
+.pref.dislikes > svg { color: var(--muted); }
+
+.pref-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.pref-item {
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+}
+
+.likes .pref-item { background: color-mix(in srgb, var(--urgent) 18%, transparent); }
+.dislikes .pref-item { background: color-mix(in srgb, var(--muted) 16%, transparent); }
+
+.friend-notes {
+  margin: 0;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  color: var(--muted);
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.friends-empty {
+  grid-column: 1 / -1;
+  padding: 48px 0;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* 卡片上的基本資料：生日、血型、工作、政治色彩 */
+.friend-nickname-sub {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.friend-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.friend-info span { overflow-wrap: anywhere; }
+.friend-info b { margin-right: 4px; font-weight: 600; color: var(--text); }
+
+.pref.hobbies > svg { color: var(--todo); }
+.hobbies .pref-item { background: color-mix(in srgb, var(--todo) 20%, transparent); }
+
+/* 編輯視窗 */
+#friend-dialog { width: min(640px, calc(100vw - 32px)); }
+
+#friend-delete:hover { color: var(--danger); }
+#friend-delete[hidden] { display: none; }
+.dialog textarea#field-likes,
+.dialog textarea#field-dislikes { min-height: 104px; }
+.dialog textarea#field-notes { min-height: 72px; }
+
+.birthday {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px;
+}
+
+.dialog input[type="number"] {
+  width: 100%;
+  padding: 9px 12px;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  outline: none;
+}
+
+.dialog input[type="number"]:focus { border-color: var(--accent); background: var(--surface); }
+
+.zodiac-field { flex: 0 0 120px; }
+
+#field-zodiac {
+  padding: 9px 0;
+  font-weight: 600;
+}
+
+@media (max-width: 480px) {
+  .zodiac-field { flex: 1; }
+  #field-zodiac { padding: 0; }
+}
